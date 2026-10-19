@@ -78,6 +78,63 @@ Amount: 12.9794 ETH
 Block: 26226363
 ```
 
+## 多链 + 多通知
+
+### 多链
+
+`chains` 是一个列表，每条链有**自己的 RPC、传输方式和规则**，并发运行：
+
+```yaml
+chains:
+  - name: ethereum
+    rpc_url: "https://ethereum-rpc.publicnode.com"
+    ws_url: "wss://ethereum-rpc.publicnode.com"
+    use_websocket: true
+    explorer: "https://etherscan.io/tx/"
+    rules:
+      - name: "ETH 巨鲸 > 500"
+        type: native_transfer
+        threshold_eth: 500
+
+  - name: bsc
+    rpc_url: "https://bsc-dataseed.binance.org"
+    explorer: "https://bscscan.com/tx/"
+    poll_interval_seconds: 6
+    rules:
+      - name: "BNB 巨鲸 > 1000"
+        type: native_transfer
+        threshold_eth: 1000
+```
+
+实测日志（两条链同时运行）：
+
+```
+chain-alert starting | chains=2 notifiers=1
+watching from block 26226411 (head 26226411)     <- ethereum
+watching from block 128548657 (head 128548657)   <- bsc
+[ALERT] Whale ETH transfer Amount: 2.1674 ETH
+Tx: https://etherscan.io/tx/0xa8ae0ff9...
+```
+
+> `explorer` 决定告警里的交易链接前缀，不同链填不同浏览器。
+
+### 多通知（Telegram + Discord 同时推送）
+
+```yaml
+telegram:
+  bot_token: "123456:ABC..."
+  chat_id: "123456789"
+
+discord:
+  webhook_url: "https://discord.com/api/webhooks/xxx/yyy"
+```
+
+- 两个都配 → **并行推送**
+- 只配一个 → 只推那个
+- 都不配 → 打印到 stdout
+
+> Discord 用 **webhook**，不需要 bot token。在频道「设置 → 整合 → Webhook」里创建。
+
 ## 配置说明
 
 ```yaml
@@ -153,11 +210,12 @@ ticker ──▶ BlockNumber ──▶ BlockByNumber ──▶ 遍历交易
 
 ## 已知限制 / Roadmap
 
-- [ ] 支持多链（当前 `txLink` 写死 etherscan，可改成配置项）
-- [ ] 支持 WebSocket 订阅（`eth_subscribe newHeads`），比轮询更实时
+- [x] 支持多链（per-chain rpc / explorer / rules）
+- [x] 支持 WebSocket 订阅（`eth_subscribe newHeads`），~1s 延迟
 - [ ] 支持持久化去重（重启后不重复告警）
 - [ ] 支持正则/表达式规则
-- [ ] 支持 Discord / 钉钉 / 企业微信
+- [x] 支持 Discord（webhook）
+- [ ] 支持钉钉 / 企业微信
 
 ## License
 

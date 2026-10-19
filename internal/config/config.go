@@ -11,20 +11,15 @@ import (
 
 // Config is the root of config.yaml.
 type Config struct {
-	Chain    ChainConfig    `yaml:"chain"`
-	Telegram TelegramConfig `yaml:"telegram"`
-	Rules    []RuleConfig   `yaml:"rules"`
-}
+	// Chains is the multi-chain form: each entry carries its own rules.
+	Chains []ChainConfig `yaml:"chains"`
 
-// ChainConfig describes the EVM chain and RPC endpoint to poll.
-type ChainConfig struct {
-	Name          string `yaml:"name"`
-	RPCURL        string `yaml:"rpc_url"`
-	WSURL         string `yaml:"ws_url"`
-	UseWebSocket  bool   `yaml:"use_websocket"`
-	StartBlock    uint64 `yaml:"start_block"`
-	Confirmations uint64 `yaml:"confirmations"`
-	PollInterval  int    `yaml:"poll_interval_seconds"`
+	// Legacy single-chain form. Used only when Chains is empty.
+	Chain ChainConfig  `yaml:"chain"`
+	Rules []RuleConfig `yaml:"rules"`
+
+	Telegram TelegramConfig `yaml:"telegram"`
+	Discord  DiscordConfig  `yaml:"discord"`
 }
 
 // TelegramConfig holds the bot credentials.
@@ -33,29 +28,43 @@ type TelegramConfig struct {
 	ChatID   string `yaml:"chat_id"`
 }
 
+// DiscordConfig holds a Discord webhook URL (no bot token required).
+type DiscordConfig struct {
+	WebhookURL string `yaml:"webhook_url"`
+}
+
+// ChainConfig describes one EVM chain, its transports and its rules.
+type ChainConfig struct {
+	Name          string       `yaml:"name"`
+	RPCURL        string       `yaml:"rpc_url"`
+	WSURL         string       `yaml:"ws_url"`
+	UseWebSocket  bool         `yaml:"use_websocket"`
+	StartBlock    uint64       `yaml:"start_block"`
+	Confirmations uint64       `yaml:"confirmations"`
+	PollInterval  int          `yaml:"poll_interval_seconds"`
+	Explorer      string       `yaml:"explorer"` // e.g. https://etherscan.io/tx/
+	Rules         []RuleConfig `yaml:"rules"`
+}
+
 // RuleConfig is one alerting rule. Only fields relevant to Type are used.
 type RuleConfig struct {
 	Name string `yaml:"name"`
 	Type string `yaml:"type"`
 
-	// native_transfer
 	ThresholdETH float64 `yaml:"threshold_eth"`
 
-	// erc20_transfer
 	Token       string  `yaml:"token"`
 	TokenSymbol string  `yaml:"token_symbol"`
 	Decimals    int     `yaml:"decimals"`
 	Threshold   float64 `yaml:"threshold"`
 
-	// contract_event
 	Address        string `yaml:"address"`
 	EventSignature string `yaml:"event_signature"`
 
-	// address_watch
 	Addresses []string `yaml:"addresses"`
 }
 
-// Load reads the YAML file and applies defaults / basic validation.
+// Load reads the YAML file, normalises the single-chain form and validates.
 func Load(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -67,54 +76,77 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 
-	if strings.TrimSpace(cfg.Chain.RPCURL) == "" {
-		return nil, fmt.Errorf("chain.rpc_url is required")
-	}
-	if cfg.Chain.Name == "" {
-		cfg.Chain.Name = "evm"
-	}
-	if cfg.Chain.PollInterval <= 0 {
-		cfg.Chain.PollInterval = 12
-	}
-	if cfg.Chain.UseWebSocket && cfg.Chain.WSURL == "" && !strings.HasPrefix(cfg.Chain.RPCURL, "ws") {
-		return nil, fmt.Errorf("chain.use_websocket requires chain.ws_url (ws:// or wss://)")
-	}
-	if len(cfg.Rules) == 0 {
-		return nil, fmt.Errorf("at least one rule is required")
+	// legacy: top-level chain + rules
+	if len(cfg.Chains) == 0 {
+		legacy := cfg.Chain
+		legacy.Rules = cfg.Rules
+		cfg.Chains = []ChainConfig{legacy}
 	}
 
-	for i := range cfg.Rules {
-		r := &cfg.Rules[i]
+	if len(cfg.Chains) == 0 {
+		return nil, fmt.Errorf("no chain configured")
+	}
+
+	for i := range cfg.Chains {
+		c := &cfg.Chains[i]
+		if strings.TrimSpace(c.RPCURL) == "" && strings.TrimSpace(c.WSURL) == "" {
+			return nil, fmt.Errorf("chain %d: rpc_url is required", i+1)
+		}
+		if c.Name == "" {
+			c.Name = fmt.Sprintf("chain-%d", i+1)
+		}
+		if c.PollInterval <= 0 {
+			c.PollInterval = 12
+		}
+		if c.UseWebSocket && c.WSURL == "" && !strings.HasPrefix(c.RPCURL, "ws") {
+			return nil, fmt.Errorf("chain %q: use_websocket requires ws_url", c.Name)
+		}
+		if c.Explorer == "" {
+			c.Explorer = "https://etherscan.io/tx/"
+		}
+		if len(c.Rules) == 0 {
+			return nil, fmt.Errorf("chain %q: at least one rule is required", c.Name)
+		}
+		if err := validateRules(c); err != nil {
+			return nil, err
+		}
+	}
+
+	return &cfg, nil
+}
+
+func validateRules(c *ChainConfig) error {
+	for i := range c.Rules {
+		r := &c.Rules[i]
 		if r.Name == "" {
-			r.Name = fmt.Sprintf("rule-%d", i+1)
+			r.Name = fmt.Sprintf("%s-rule-%d", c.Name, i+1)
 		}
 		switch r.Type {
 		case "native_transfer":
 			if r.ThresholdETH <= 0 {
-				return nil, fmt.Errorf("rule %q: threshold_eth must be > 0", r.Name)
+				return fmt.Errorf("chain %q rule %q: threshold_eth must be > 0", c.Name, r.Name)
 			}
 		case "erc20_transfer":
 			if r.Token == "" {
-				return nil, fmt.Errorf("rule %q: token is required", r.Name)
+				return fmt.Errorf("chain %q rule %q: token is required", c.Name, r.Name)
 			}
 			if r.Decimals < 0 || r.Decimals > 36 {
-				return nil, fmt.Errorf("rule %q: decimals out of range", r.Name)
+				return fmt.Errorf("chain %q rule %q: decimals out of range", c.Name, r.Name)
 			}
 			if r.TokenSymbol == "" {
 				r.TokenSymbol = "TOKEN"
 			}
 		case "contract_event":
 			if r.Address == "" || r.EventSignature == "" {
-				return nil, fmt.Errorf("rule %q: address and event_signature are required", r.Name)
+				return fmt.Errorf("chain %q rule %q: address and event_signature are required", c.Name, r.Name)
 			}
 		case "address_watch":
 			if len(r.Addresses) == 0 {
-				return nil, fmt.Errorf("rule %q: addresses is required", r.Name)
+				return fmt.Errorf("chain %q rule %q: addresses is required", c.Name, r.Name)
 			}
 		default:
-			return nil, fmt.Errorf("rule %q: unknown type %q", r.Name, r.Type)
+			return fmt.Errorf("chain %q rule %q: unknown type %q", c.Name, r.Name, r.Type)
 		}
 	}
-
-	return &cfg, nil
+	return nil
 }

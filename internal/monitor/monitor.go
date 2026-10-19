@@ -26,7 +26,7 @@ var erc20TransferTopic = crypto.Keccak256Hash([]byte("Transfer(address,address,u
 
 // Monitor owns the RPC connection and the in-memory dedup state.
 type Monitor struct {
-	cfg      *config.Config
+	chain    config.ChainConfig
 	client   *ethclient.Client
 	notifier notify.Notifier
 	seen     map[string]time.Time
@@ -42,19 +42,19 @@ type compiledRule struct {
 }
 
 // New dials the RPC endpoint and compiles the configured rules.
-func New(cfg *config.Config, notifier notify.Notifier) (*Monitor, error) {
-	endpoint := cfg.Chain.RPCURL
-	if cfg.Chain.UseWebSocket && cfg.Chain.WSURL != "" {
-		endpoint = cfg.Chain.WSURL
+func New(chain config.ChainConfig, notifier notify.Notifier) (*Monitor, error) {
+	endpoint := chain.RPCURL
+	if chain.UseWebSocket && chain.WSURL != "" {
+		endpoint = chain.WSURL
 	}
 	client, err := ethclient.Dial(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("dial rpc %s: %w", endpoint, err)
 	}
 
-	m := &Monitor{cfg: cfg, client: client, notifier: notifier, seen: make(map[string]time.Time), useWS: cfg.Chain.UseWebSocket}
+	m := &Monitor{chain: chain, client: client, notifier: notifier, seen: make(map[string]time.Time), useWS: chain.UseWebSocket}
 
-	for _, rc := range cfg.Rules {
+	for _, rc := range chain.Rules {
 		cr := compiledRule{cfg: rc}
 		switch rc.Type {
 		case "erc20_transfer":
@@ -132,13 +132,13 @@ func (m *Monitor) runPoll(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get block number: %w", err)
 	}
-	next := m.cfg.Chain.StartBlock
+	next := m.chain.StartBlock
 	if next == 0 || next > head {
 		next = head
 	}
 	log.Printf("watching from block %d (head %d)", next, head)
 
-	ticker := time.NewTicker(time.Duration(m.cfg.Chain.PollInterval) * time.Second)
+	ticker := time.NewTicker(time.Duration(m.chain.PollInterval) * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -153,11 +153,11 @@ func (m *Monitor) runPoll(ctx context.Context) error {
 				continue
 			}
 			target := latest
-			if m.cfg.Chain.Confirmations > 0 {
-				if latest <= m.cfg.Chain.Confirmations {
+			if m.chain.Confirmations > 0 {
+				if latest <= m.chain.Confirmations {
 					continue
 				}
-				target = latest - m.cfg.Chain.Confirmations
+				target = latest - m.chain.Confirmations
 			}
 			for next <= target {
 				if err := m.processBlock(ctx, next); err != nil {
@@ -177,8 +177,8 @@ func (m *Monitor) RunOnce(ctx context.Context) error {
 		return fmt.Errorf("get block number: %w", err)
 	}
 	target := latest
-	if m.cfg.Chain.Confirmations > 0 && latest > m.cfg.Chain.Confirmations {
-		target = latest - m.cfg.Chain.Confirmations
+	if m.chain.Confirmations > 0 && latest > m.chain.Confirmations {
+		target = latest - m.chain.Confirmations
 	}
 	log.Printf("scanning block %d once", target)
 	return m.processBlock(ctx, target)
@@ -227,7 +227,12 @@ func (m *Monitor) logAddresses() []common.Address {
 }
 
 func (m *Monitor) checkTransaction(block *types.Block, tx *types.Transaction) {
-	signer := types.LatestSignerForChainID(tx.ChainId())
+	// Legacy (pre-EIP-155) transactions report chainID 0, which makes
+	// LatestSignerForChainID panic, so fall back to the Homestead signer.
+	signer := types.Signer(types.HomesteadSigner{})
+	if id := tx.ChainId(); id != nil && id.Sign() > 0 {
+		signer = types.LatestSignerForChainID(id)
+	}
 	from, err := types.Sender(signer, tx)
 	if err != nil {
 		from = common.Address{}
@@ -249,7 +254,7 @@ func (m *Monitor) checkTransaction(block *types.Block, tx *types.Transaction) {
 			}
 			msg := fmt.Sprintf(
 				"<b>Whale ETH transfer</b>\nRule: %s\nAmount: <b>%.4f ETH</b>\nFrom: <code>%s</code>\nTo: <code>%s</code>\nBlock: %d\nTx: %s",
-				r.cfg.Name, eth, from.Hex(), to.Hex(), block.NumberU64(), txLink(tx.Hash().Hex()),
+				r.cfg.Name, eth, from.Hex(), to.Hex(), block.NumberU64(), m.txLink(tx.Hash().Hex()),
 			)
 			m.emit(tx.Hash().Hex(), r.cfg.Name, msg)
 
@@ -259,7 +264,7 @@ func (m *Monitor) checkTransaction(block *types.Block, tx *types.Transaction) {
 			}
 			msg := fmt.Sprintf(
 				"<b>Watched address activity</b>\nRule: %s\nFrom: <code>%s</code>\nTo: <code>%s</code>\nBlock: %d\nTx: %s",
-				r.cfg.Name, from.Hex(), to.Hex(), block.NumberU64(), txLink(tx.Hash().Hex()),
+				r.cfg.Name, from.Hex(), to.Hex(), block.NumberU64(), m.txLink(tx.Hash().Hex()),
 			)
 			m.emit(tx.Hash().Hex(), r.cfg.Name, msg)
 		}
@@ -289,14 +294,14 @@ func (m *Monitor) checkLog(block *types.Block, lg types.Log) {
 			msg := fmt.Sprintf(
 				"<b>%s large transfer</b>\nRule: %s\nAmount: <b>%.2f %s</b>\nFrom: <code>%s</code>\nTo: <code>%s</code>\nBlock: %d\nTx: %s",
 				r.cfg.TokenSymbol, r.cfg.Name, human, r.cfg.TokenSymbol,
-				from.Hex(), to.Hex(), block.NumberU64(), txLink(lg.TxHash.Hex()),
+				from.Hex(), to.Hex(), block.NumberU64(), m.txLink(lg.TxHash.Hex()),
 			)
 			m.emit(lg.TxHash.Hex(), r.cfg.Name, msg)
 
 		case "contract_event":
 			msg := fmt.Sprintf(
 				"<b>Contract event</b>\nRule: %s\nContract: <code>%s</code>\nEvent: <code>%s</code>\nBlock: %d\nTx: %s",
-				r.cfg.Name, lg.Address.Hex(), r.cfg.EventSignature, block.NumberU64(), txLink(lg.TxHash.Hex()),
+				r.cfg.Name, lg.Address.Hex(), r.cfg.EventSignature, block.NumberU64(), m.txLink(lg.TxHash.Hex()),
 			)
 			m.emit(lg.TxHash.Hex(), r.cfg.Name, msg)
 		}
@@ -341,6 +346,6 @@ func tokenAmount(raw *big.Int, decimals int) float64 {
 }
 
 // txLink builds an Etherscan link. Change the base for other chains.
-func txLink(hash string) string {
-	return "https://etherscan.io/tx/" + hash
+func (m *Monitor) txLink(hash string) string {
+	return m.chain.Explorer + hash
 }

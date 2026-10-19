@@ -1,50 +1,57 @@
 # chain-alert config example
 # Copy to config.yaml and fill in your own values (config.yaml is gitignored).
 
-chain:
-  name: ethereum
-  # Public RPC (example only - use your own node in production)
-  rpc_url: "https://ethereum-rpc.publicnode.com"
-  # Optional WebSocket endpoint for push notifications (eth_subscribe newHeads).
-  # Set use_websocket: true to get ~1s latency instead of the poll interval.
-  ws_url: "wss://ethereum-rpc.publicnode.com"
-  use_websocket: false
-  # 0 = start from the current head
-  start_block: 0
-  # wait N confirmations before processing
-  confirmations: 1
-  # poll interval in seconds
-  poll_interval_seconds: 12
-
+# --- 通知渠道（可同时配置多个，会并行推送）---
 telegram:
-  # create a bot via @BotFather
-  bot_token: "123456:ABC-DEF..."
-  # send your bot a message, then open
-  # https://api.telegram.org/bot<TOKEN>/getUpdates to find your chat id
+  bot_token: "123456:ABC-DEF..."   # @BotFather 创建
   chat_id: "123456789"
 
-rules:
-  # 1) large native ETH transfers
-  - name: "ETH whale transfer"
-    type: native_transfer
-    threshold_eth: 1000
+discord:
+  webhook_url: ""                  # 频道设置 -> 整合 -> Webhook -> 复制 URL
 
-  # 2) large ERC20 transfers (USDT example)
-  - name: "USDT large transfer"
-    type: erc20_transfer
-    token: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-    token_symbol: "USDT"
-    decimals: 6
-    threshold: 1000000
+# --- 多链配置：每个链有自己的 RPC 和规则 ---
+chains:
+  - name: ethereum
+    rpc_url: "https://ethereum-rpc.publicnode.com"
+    ws_url: "wss://ethereum-rpc.publicnode.com"
+    use_websocket: true
+    explorer: "https://etherscan.io/tx/"
+    confirmations: 0
+    poll_interval_seconds: 12
+    rules:
+      - name: "ETH 巨鲸 > 500"
+        type: native_transfer
+        threshold_eth: 500
+      - name: "USDT 巨鲸 > 100万"
+        type: erc20_transfer
+        token: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+        token_symbol: "USDT"
+        decimals: 6
+        threshold: 1000000
 
-  # 3) watch a contract event (types only, no parameter names)
-  - name: "Uniswap V2 Swap"
-    type: contract_event
-    address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
-    event_signature: "Swap(address,uint256,uint256,uint256,uint256,address)"
+  - name: bsc
+    rpc_url: "https://bsc-dataseed.binance.org"
+    ws_url: "wss://bsc-ws-node.nariox.org:443"
+    use_websocket: false
+    explorer: "https://bscscan.com/tx/"
+    confirmations: 1
+    poll_interval_seconds: 6
+    rules:
+      - name: "BNB 巨鲸 > 1000"
+        type: native_transfer
+        threshold_eth: 1000      # 这里的 "eth" 单位对 BNB 同样适用（18 位小数）
+      - name: "BUSD 大额 > 50万"
+        type: erc20_transfer
+        token: "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56"
+        token_symbol: "BUSD"
+        decimals: 18
+        threshold: 500000
 
-  # 4) watch specific addresses
-  - name: "Watched addresses"
-    type: address_watch
-    addresses:
-      - "0x00000000219ab540356cBB839Cbe05303d7705Fa"
+# --- 单链兼容写法（如果不用 chains，可用顶层 chain + rules）---
+# chain:
+#   name: ethereum
+#   rpc_url: "https://ethereum-rpc.publicnode.com"
+# rules:
+#   - name: "ETH whale"
+#     type: native_transfer
+#     threshold_eth: 1000
