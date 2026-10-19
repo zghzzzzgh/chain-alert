@@ -1,5 +1,9 @@
+# local configs with secrets
 config.yaml
+config.demo.yaml
+config.test.yaml
 *.log
+*.log.err
 chain-alert
 chain-alert.exe
 dist/
