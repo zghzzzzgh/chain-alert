@@ -11,9 +11,9 @@ import (
 "os/signal"
 "syscall"
 
-"chain-alert/internal/config"
-"chain-alert/internal/monitor"
-"chain-alert/internal/notify"
+"github.com/zghzzzzgh/chain-alert/internal/config"
+"github.com/zghzzzzgh/chain-alert/internal/monitor"
+"github.com/zghzzzzgh/chain-alert/internal/notify"
 )
 
 func main() {

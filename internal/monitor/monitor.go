@@ -17,8 +17,8 @@ import (
 "github.com/ethereum/go-ethereum/crypto"
 "github.com/ethereum/go-ethereum/ethclient"
 
-"chain-alert/internal/config"
-"chain-alert/internal/notify"
+"github.com/zghzzzzgh/chain-alert/internal/config"
+"github.com/zghzzzzgh/chain-alert/internal/notify"
 )
 
 // erc20TransferTopic is keccak256("Transfer(address,address,uint256)").

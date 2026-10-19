@@ -1,4 +1,4 @@
-module chain-alert
+module github.com/zghzzzzgh/chain-alert
 
 go 1.27
 
