@@ -9,3 +9,8 @@ chain-alert.exe
 dist/
 .env
 *.err
+
+# personal notes - never publish
+article*.md
+接单指南.md
+*.local.md
