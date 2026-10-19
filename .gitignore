@@ -1,7 +1,7 @@
 # local configs with secrets
 config.yaml
-config.demo.yaml
-config.test.yaml
+config.*.yaml
+!config.example.yaml
 *.log
 *.log.err
 chain-alert

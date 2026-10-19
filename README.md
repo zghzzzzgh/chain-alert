@@ -52,6 +52,32 @@ Amount: <b>3528000.00 USDT</b>
 ...
 ```
 
+## 两种运行模式
+
+| 模式 | 传输 | 延迟 | 适用 |
+|---|---|---|---|
+| `poll`（默认） | HTTP 轮询 `eth_blockNumber` | 12–24 秒 | 任何 HTTP RPC |
+| `ws` | WebSocket `eth_subscribe("newHeads")` | **~1 秒** | 支持 wss:// 的节点 |
+
+```yaml
+chain:
+  rpc_url: "https://ethereum-rpc.publicnode.com"
+  ws_url: "wss://ethereum-rpc.publicnode.com"
+  use_websocket: true   # false = 轮询
+```
+
+> ⚠️ WebSocket 模式下 `confirmations` **不生效** —— 告警在区块头到达时立即发出。
+> 需要等待确认数时请用 `poll` 模式。
+
+实测（WS 模式，区块 26226363 到达后立即触发）：
+
+```
+websocket mode: subscribed to newHeads (confirmations ignored)
+[ALERT] Whale ETH transfer
+Amount: 12.9794 ETH
+Block: 26226363
+```
+
 ## 配置说明
 
 ```yaml

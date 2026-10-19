@@ -5,6 +5,10 @@ chain:
   name: ethereum
   # Public RPC (example only - use your own node in production)
   rpc_url: "https://ethereum-rpc.publicnode.com"
+  # Optional WebSocket endpoint for push notifications (eth_subscribe newHeads).
+  # Set use_websocket: true to get ~1s latency instead of the poll interval.
+  ws_url: "wss://ethereum-rpc.publicnode.com"
+  use_websocket: false
   # 0 = start from the current head
   start_block: 0
   # wait N confirmations before processing
