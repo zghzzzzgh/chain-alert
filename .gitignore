@@ -8,3 +8,4 @@ chain-alert
 chain-alert.exe
 dist/
 .env
+*.err
