@@ -4,6 +4,7 @@ package notify
 import (
 "fmt"
 "log"
+"strings"
 
 tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -22,7 +23,7 @@ func NewStdout() *Stdout { return &Stdout{} }
 
 // Send implements Notifier.
 func (s *Stdout) Send(text string) error {
-log.Printf("[ALERT] %s", text)
+log.Printf("[ALERT] %s", stripHTML(text))
 return nil
 }
 
@@ -38,6 +39,7 @@ bot, err := tgbotapi.NewBotAPI(token)
 if err != nil {
 return nil, fmt.Errorf("telegram auth: %w", err)
 }
+log.Printf("telegram bot ready: @%s -> chat %s", bot.Self.UserName, chatID)
 return &Telegram{bot: bot, chatID: chatID}, nil
 }
 
@@ -46,6 +48,24 @@ func (t *Telegram) Send(text string) error {
 msg := tgbotapi.NewMessageToChannel(t.chatID, text)
 msg.ParseMode = "HTML"
 msg.DisableWebPagePreview = true
-_, err := t.bot.Send(msg)
+sent, err := t.bot.Send(msg)
+if err != nil {
 return err
+}
+log.Printf("[SENT] telegram msg_id=%d | %s", sent.MessageID, firstLine(text))
+return nil
+}
+
+// stripHTML is a very small helper for readable stdout output.
+func stripHTML(s string) string {
+r := strings.NewReplacer("<b>", "", "</b>", "", "<code>", "", "</code>", "", "<a href=\"", "(", "\">", ") ", "</a>", "")
+return r.Replace(s)
+}
+
+func firstLine(s string) string {
+s = stripHTML(s)
+if i := strings.IndexByte(s, '\n'); i >= 0 {
+return s[:i]
+}
+return s
 }
